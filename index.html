@@ -842,12 +842,38 @@
 
                 <button class="btn" onclick="createEmailFiles()">1. ファイルの作成</button>
                 <button class="btn btn-secondary" onclick="launchEmailClient()">2. メールソフト起動</button>
+                <button class="btn btn-primary" onclick="showDirectSubmitModal()">📤 直接送信</button>
                 
                 <div id="emailPreview" style="display: none; margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
                     <h3>送信内容プレビュー</h3>
                     <div id="emailPreviewContent"></div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- 直接送信モーダル -->
+    <div id="directSubmitModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📤 データ直接送信</h3>
+                <button class="close-btn" onclick="closeDirectSubmitModal()">&times;</button>
+            </div>
+            
+            <div class="form-group">
+                <label for="directSubmitPassword">🔐 パスワード</label>
+                <input type="password" id="directSubmitPassword" placeholder="認証用パスワードを入力してください">
+                <small>データ送信のための認証パスワードを入力してください</small>
+            </div>
+            
+            <div class="form-group">
+                <label>📋 送信データの確認</label>
+                <div id="directSubmitDataSummary" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                    <!-- データサマリーがここに表示されます -->
+                </div>
+            </div>
+            
+            <button class="btn btn-primary" onclick="submitDataDirectly()">📤 データを送信</button>
         </div>
     </div>
 
@@ -2251,6 +2277,133 @@
             setTimeout(() => {
                 alertDiv.remove();
             }, 3000);
+        }
+
+        // 直接送信モーダル表示
+        function showDirectSubmitModal() {
+            // URLパラメータからUserIdを取得
+            const urlParams = new URLSearchParams(window.location.search);
+            const userId = urlParams.get('userId');
+            
+            if (!userId) {
+                showAlert('URLパラメータにuserIdが指定されていません。', 'error');
+                return;
+            }
+            
+            // データサマリーを表示
+            const summary = `
+                <strong>📊 送信データサマリー</strong><br>
+                • ユーザーID: ${userId}<br>
+                • 従業員数: ${employees.length}名<br>
+                • 給料データ: ${salaryData.length}件<br>
+                • 給料項目: ${salaryItems.length}個<br>
+                • 最終更新: ${new Date().toLocaleString()}
+            `;
+            document.getElementById('directSubmitDataSummary').innerHTML = summary;
+            
+            // モーダルを表示
+            document.getElementById('directSubmitModal').style.display = 'block';
+        }
+
+        // 直接送信モーダルを閉じる
+        function closeDirectSubmitModal() {
+            document.getElementById('directSubmitModal').style.display = 'none';
+            document.getElementById('directSubmitPassword').value = '';
+        }
+
+        // データを直接送信
+        function submitDataDirectly() {
+            const password = document.getElementById('directSubmitPassword').value;
+            
+            if (!password) {
+                showAlert('パスワードを入力してください。', 'error');
+                return;
+            }
+            
+            // URLパラメータからUserIdを取得
+            const urlParams = new URLSearchParams(window.location.search);
+            const userId = urlParams.get('userId');
+            
+            if (!userId) {
+                showAlert('URLパラメータにuserIdが指定されていません。', 'error');
+                return;
+            }
+            
+            // 本番用GASのURL
+            const webhookUrl = 'https://script.google.com/macros/s/AKfycbwl_jL4zt1PlHsGpz0SauH1PKRBotSOKEP98uAHu3sSzuvmLY0fJJEe2qO2UZIzKXUD/exec';
+            
+            // データを準備（ファイル作成と同じ形式）
+            const data = {
+                employees: employees,
+                salaryItems: salaryItems,
+                salaryData: salaryData,
+                auth: {
+                    userId: userId,
+                    password: password,
+                    applicationName: '給料管理システム'
+                },
+                metadata: {
+                    submittedAt: new Date().toISOString()
+                }
+            };
+            
+            // 送信実行
+            submitToGoogleAppsScript(webhookUrl, data);
+        }
+
+        // Google Apps Script対応の送信関数
+        function submitToGoogleAppsScript(webhookUrl, data) {
+            try {
+                console.log('データ送信開始:', webhookUrl);
+                console.log('送信データ:', data);
+                
+                // データをBase64エンコードして送信（特殊文字対応）
+                const jsonString = JSON.stringify(data);
+                const encodedData = btoa(unescape(encodeURIComponent(jsonString)));
+                
+                // フォーム送信方式を使用（CORS問題を回避）
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = webhookUrl;
+                form.target = 'hiddenFrame'; // 非表示フレームで送信
+                form.style.display = 'none';
+                
+                // 非表示のiframeを作成してレスポンスを受信
+                let hiddenFrame = document.getElementById('hiddenFrame');
+                if (!hiddenFrame) {
+                    hiddenFrame = document.createElement('iframe');
+                    hiddenFrame.id = 'hiddenFrame';
+                    hiddenFrame.name = 'hiddenFrame';
+                    hiddenFrame.style.display = 'none';
+                    document.body.appendChild(hiddenFrame);
+                }
+                
+                // データをフォームフィールドとして追加
+                const dataField = document.createElement('input');
+                dataField.type = 'hidden';
+                dataField.name = 'postData';
+                dataField.value = encodedData;
+                form.appendChild(dataField);
+                
+                // フォームをDOMに追加して送信
+                document.body.appendChild(form);
+                form.submit();
+                
+                // 送信後の処理
+                showAlert('データの送信を開始しました。管理者にメール通知が送信されます。', 'success');
+                closeDirectSubmitModal();
+                
+                // フォームを削除
+                setTimeout(() => {
+                    if (document.body.contains(form)) {
+                        document.body.removeChild(form);
+                    }
+                }, 2000);
+                
+            } catch (error) {
+                console.error('データ送信エラー:', error);
+                showAlert('データの送信に失敗しました。管理者にご連絡ください。', 'error');
+            }
         }
     </script>
 </body>
